@@ -13,6 +13,9 @@ const livePreviewStatus = document.getElementById("livePreviewStatus");
 const shareNote = document.getElementById("shareNote");
 const cameraBlock = document.querySelector(".camera-block");
 
+const railwayApiOrigin = "https://video-card-api-production.up.railway.app";
+const apiOrigin = window.location.hostname.endsWith("vercel.app") ? railwayApiOrigin : "";
+
 const toNameCounter = document.getElementById("toNameCounter");
 const fromNameCounter = document.getElementById("fromNameCounter");
 const headlineCounter = document.getElementById("headlineCounter");
@@ -362,6 +365,14 @@ function canUploadRecordedVideo() {
   return window.location.protocol.startsWith("http") && uploadBackendAvailable;
 }
 
+function apiUrl(path) {
+  if (!apiOrigin) {
+    return path;
+  }
+
+  return new URL(path, apiOrigin).toString();
+}
+
 function uploadSetupHint() {
   const origin = window.location.origin && window.location.origin !== "null" ? window.location.origin : "http://127.0.0.1:3000";
   return `Start this app with \`node server.js\` and open ${origin}.`;
@@ -406,7 +417,7 @@ async function detectUploadBackendAvailability() {
   }
 
   try {
-    const response = await fetch("/healthz", {
+    const response = await fetch(apiUrl("/healthz"), {
       method: "GET",
       cache: "no-store",
     });
@@ -433,7 +444,7 @@ async function uploadRecordedVideo() {
 
   let response;
   try {
-    response = await fetch("/api/upload", {
+    response = await fetch(apiUrl("/api/upload"), {
       method: "POST",
       headers: {
         "Content-Type": recordedVideoBlob.type || "video/webm",
@@ -459,7 +470,7 @@ async function uploadRecordedVideo() {
     throw new Error("Upload response did not include a valid video URL.");
   }
 
-  uploadedVideoUrl = new URL(payload.videoUrl, window.location.origin).toString();
+  uploadedVideoUrl = new URL(payload.videoUrl, apiOrigin || window.location.origin).toString();
   syncRecordingControls();
   updatePreview();
   return uploadedVideoUrl;

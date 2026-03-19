@@ -36,6 +36,19 @@ const allowedUploadTypes = {
 const publicRootFiles = new Set(["index.html", "app.js", "styles.css"]);
 const uploadRateLimit = new Map();
 
+const envCorsOrigins = String(process.env.CORS_ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const allowedCorsOrigins = new Set([
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "https://video-card-studio.vercel.app",
+  "https://video-card-studio-naufalbayhaqis-projects.vercel.app",
+  ...envCorsOrigins,
+]);
+
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -66,6 +79,7 @@ function defaultHeaders() {
 function writeResponse(response, statusCode, headers, body) {
   response.writeHead(statusCode, {
     ...defaultHeaders(),
+    ...(response.corsHeaders || {}),
     ...headers,
   });
 
@@ -163,6 +177,25 @@ function parseContentType(headerValue) {
     .split(";")[0]
     .trim()
     .toLowerCase();
+}
+
+function getCorsHeaders(request) {
+  const origin = String(request.headers.origin || "").trim();
+  if (!origin) {
+    return {};
+  }
+
+  if (allowedCorsOrigins.has("*") || allowedCorsOrigins.has(origin)) {
+    return {
+      "Access-Control-Allow-Origin": allowedCorsOrigins.has("*") ? "*" : origin,
+      "Access-Control-Allow-Methods": "GET,HEAD,POST,OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Max-Age": "600",
+      Vary: "Origin",
+    };
+  }
+
+  return null;
 }
 
 function getClientIdentifier(request) {
@@ -365,6 +398,9 @@ function handleUpload(request, response) {
 }
 
 const server = http.createServer((request, response) => {
+  const corsHeaders = getCorsHeaders(request);
+  response.corsHeaders = corsHeaders || {};
+
   const startedAt = process.hrtime.bigint();
   response.on("finish", () => {
     const elapsedMs = Number(process.hrtime.bigint() - startedAt) / 1_000_000;
@@ -381,6 +417,24 @@ const server = http.createServer((request, response) => {
     url = new URL(request.url, `http://${host}:${port}`);
   } catch {
     sendText(response, 400, "Bad request URL");
+    return;
+  }
+
+  const isCorsSensitiveRoute = url.pathname === "/api/upload" || url.pathname === "/healthz";
+  if (request.headers.origin && corsHeaders === null && isCorsSensitiveRoute) {
+    sendText(response, 403, "CORS origin not allowed");
+    return;
+  }
+
+  if (request.method === "OPTIONS") {
+    if (isCorsSensitiveRoute && corsHeaders !== null) {
+      writeResponse(response, 204, {
+        "Cache-Control": "no-store",
+      });
+      return;
+    }
+
+    sendText(response, 405, "Method not allowed");
     return;
   }
 
