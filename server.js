@@ -10,6 +10,8 @@ const uploadDir = path.join(rootDir, "uploads");
 const maxUploadBytes = Number(process.env.MAX_UPLOAD_BYTES) || 50 * 1024 * 1024;
 const uploadRequestTimeoutMs = Number(process.env.UPLOAD_REQUEST_TIMEOUT_MS) || 30_000;
 const staticAssetMaxAgeSeconds = Number(process.env.STATIC_MAX_AGE_SECONDS) || 3600;
+const uploadWindowMs = Number(process.env.UPLOAD_WINDOW_MS) || 10 * 60 * 1000;
+const maxUploadsPerWindow = Number(process.env.MAX_UPLOADS_PER_WINDOW) || 20;
 
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
@@ -31,6 +33,9 @@ const allowedUploadTypes = {
   "video/ogg": ".ogg",
 };
 
+const publicRootFiles = new Set(["index.html", "app.js", "styles.css"]);
+const uploadRateLimit = new Map();
+
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
@@ -51,7 +56,7 @@ function defaultHeaders() {
       "style-src 'self' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data:",
-      "media-src 'self' blob:",
+      "media-src 'self' blob: https:",
       "connect-src 'self'",
       "frame-src https://www.youtube.com https://player.vimeo.com",
     ].join("; "),
@@ -100,7 +105,7 @@ function sendText(response, statusCode, message) {
   );
 }
 
-function normalizePath(requestPath) {
+function resolvePublicPath(requestPath) {
   if (requestPath === "/") {
     return path.join(rootDir, "index.html");
   }
@@ -113,10 +118,22 @@ function normalizePath(requestPath) {
   }
 
   const normalizedPath = path.normalize(decodedPath).replace(/^[/\\]+/, "");
-  const absolutePath = path.resolve(rootDir, normalizedPath);
-  const rootWithSep = `${rootDir}${path.sep}`;
 
-  if (absolutePath !== rootDir && !absolutePath.startsWith(rootWithSep)) {
+  if (!normalizedPath || normalizedPath.startsWith("..") || normalizedPath.includes(`..${path.sep}`)) {
+    return null;
+  }
+
+  const absolutePath = path.resolve(rootDir, normalizedPath);
+
+  if (normalizedPath.startsWith(`uploads${path.sep}`)) {
+    const uploadsWithSep = `${uploadDir}${path.sep}`;
+    if (absolutePath.startsWith(uploadsWithSep)) {
+      return absolutePath;
+    }
+    return null;
+  }
+
+  if (!publicRootFiles.has(normalizedPath)) {
     return null;
   }
 
@@ -146,6 +163,43 @@ function parseContentType(headerValue) {
     .split(";")[0]
     .trim()
     .toLowerCase();
+}
+
+function getClientIdentifier(request) {
+  const forwarded = String(request.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  if (forwarded) {
+    return forwarded;
+  }
+
+  return request.socket.remoteAddress || "unknown";
+}
+
+function canUpload(request) {
+  const now = Date.now();
+
+  if (uploadRateLimit.size > 2000) {
+    for (const [key, value] of uploadRateLimit) {
+      if (now - value.windowStart > uploadWindowMs) {
+        uploadRateLimit.delete(key);
+      }
+    }
+  }
+
+  const key = getClientIdentifier(request);
+  const current = uploadRateLimit.get(key);
+
+  if (!current || now - current.windowStart > uploadWindowMs) {
+    uploadRateLimit.set(key, { windowStart: now, count: 1 });
+    return true;
+  }
+
+  if (current.count >= maxUploadsPerWindow) {
+    return false;
+  }
+
+  current.count += 1;
+  uploadRateLimit.set(key, current);
+  return true;
 }
 
 function serveFile(filePath, response, method, requestHeaders) {
@@ -207,6 +261,13 @@ function serveFile(filePath, response, method, requestHeaders) {
 }
 
 function handleUpload(request, response) {
+  if (!canUpload(request)) {
+    sendJson(response, 429, { error: "Too many uploads. Please try again later." }, {
+      "Retry-After": Math.ceil(uploadWindowMs / 1000),
+    });
+    return;
+  }
+
   const contentType = parseContentType(request.headers["content-type"]);
   const extension = allowedUploadTypes[contentType];
 
@@ -349,9 +410,9 @@ const server = http.createServer((request, response) => {
     return;
   }
 
-  const filePath = normalizePath(url.pathname);
+  const filePath = resolvePublicPath(url.pathname);
   if (!filePath) {
-    sendText(response, 403, "Forbidden");
+    sendText(response, 404, "Not found");
     return;
   }
 
