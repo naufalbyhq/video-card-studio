@@ -369,6 +369,10 @@ textarea {
   gap: 0.65rem;
 }
 
+.camera-block.disabled {
+  opacity: 0.72;
+}
+
 .builder-guide {
   border: 1px solid rgba(126, 79, 60, 0.18);
   background: linear-gradient(145deg, rgba(255, 250, 244, 0.88) 0%, rgba(252, 255, 250, 0.9) 100%);

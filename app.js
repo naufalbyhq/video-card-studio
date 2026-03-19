@@ -10,6 +10,8 @@ const recordStatus = document.getElementById("recordStatus");
 const videoUrlHint = document.getElementById("videoUrlHint");
 const builderGuideText = document.getElementById("builderGuideText");
 const livePreviewStatus = document.getElementById("livePreviewStatus");
+const shareNote = document.getElementById("shareNote");
+const cameraBlock = document.querySelector(".camera-block");
 
 const toNameCounter = document.getElementById("toNameCounter");
 const fromNameCounter = document.getElementById("fromNameCounter");
@@ -43,6 +45,7 @@ let recordedVideoUrl = "";
 let recordedVideoBlob = null;
 let uploadedVideoUrl = "";
 let isUploadingVideo = false;
+let uploadBackendAvailable = true;
 let activePreviewVideoType = "none";
 let activePreviewVideoUrl = "";
 let lastAnnouncedPreviewState = "";
@@ -356,12 +359,61 @@ function loadStateFromQuery() {
 }
 
 function canUploadRecordedVideo() {
-  return window.location.protocol.startsWith("http");
+  return window.location.protocol.startsWith("http") && uploadBackendAvailable;
 }
 
 function uploadSetupHint() {
   const origin = window.location.origin && window.location.origin !== "null" ? window.location.origin : "http://127.0.0.1:3000";
   return `Start this app with \`node server.js\` and open ${origin}.`;
+}
+
+function setRecordingAvailability(isAvailable) {
+  uploadBackendAvailable = isAvailable;
+
+  if (isAvailable) {
+    cameraEnableBtn.disabled = false;
+    syncRecordingControls();
+    if (cameraBlock) {
+      cameraBlock.classList.remove("disabled");
+    }
+    if (shareNote?.dataset.defaultNote) {
+      shareNote.textContent = shareNote.dataset.defaultNote;
+    }
+    return;
+  }
+
+  stopCamera();
+  setRecordingButtons(false);
+  cameraEnableBtn.disabled = true;
+  recordStartBtn.disabled = true;
+  recordStopBtn.disabled = true;
+  recordClearBtn.disabled = true;
+
+  if (cameraBlock) {
+    cameraBlock.classList.add("disabled");
+  }
+
+  setRecordStatus("Camera recording upload is unavailable on this deployment. Use a video URL instead.", "warning");
+  if (shareNote) {
+    shareNote.textContent = "This hosted version supports shareable links from URL videos. Camera upload sharing requires a Node server runtime.";
+  }
+}
+
+async function detectUploadBackendAvailability() {
+  if (!window.location.protocol.startsWith("http")) {
+    setRecordingAvailability(false);
+    return;
+  }
+
+  try {
+    const response = await fetch("/healthz", {
+      method: "GET",
+      cache: "no-store",
+    });
+    setRecordingAvailability(response.ok);
+  } catch {
+    setRecordingAvailability(false);
+  }
 }
 
 async function uploadRecordedVideo() {
@@ -416,6 +468,11 @@ async function uploadRecordedVideo() {
 async function generateShareUrl() {
   if (isUploadingVideo) {
     setCopyStatus("Upload already in progress...", "info");
+    return;
+  }
+
+  if (recordedVideoBlob && !uploadBackendAvailable) {
+    setCopyStatus("This deployment cannot upload camera recordings. Use a video URL instead.", "warning");
     return;
   }
 
@@ -486,6 +543,11 @@ function getSupportedMimeType() {
 }
 
 async function enableCamera() {
+  if (!uploadBackendAvailable) {
+    setRecordStatus("Camera upload is disabled on this deployment. Use a video URL instead.", "warning");
+    return;
+  }
+
   if (!navigator.mediaDevices?.getUserMedia) {
     setRecordStatus("Camera API is not available in this browser.", "error");
     return;
@@ -525,6 +587,11 @@ function clearRecording() {
 }
 
 function startRecording() {
+  if (!uploadBackendAvailable) {
+    setRecordStatus("Camera upload is disabled on this deployment. Use a video URL instead.", "warning");
+    return;
+  }
+
   if (!cameraStream) {
     setRecordStatus("Enable your camera first.", "warning");
     return;
@@ -634,3 +701,4 @@ updateCharCounters();
 updatePreview();
 syncCopyButtonState();
 syncRecordingControls();
+detectUploadBackendAvailability();
