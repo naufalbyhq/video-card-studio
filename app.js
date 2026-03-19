@@ -57,6 +57,8 @@ let activePreviewVideoUrl = "";
 let lastAnnouncedPreviewState = "";
 
 const recordingChunkIntervalMs = 500;
+const isAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+  || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
 const defaultState = {
   toName: "To someone special",
@@ -740,10 +742,11 @@ function startRecording() {
 
   const mimeType = getSupportedMimeType();
   const audioState = getAudioTrackState(cameraStream);
+  const shouldForceMimeType = Boolean(mimeType) && !isAppleMobile;
 
   try {
     recordingStream = buildRecordingStream(cameraStream);
-    mediaRecorder = mimeType
+    mediaRecorder = shouldForceMimeType
       ? new MediaRecorder(recordingStream, { mimeType })
       : new MediaRecorder(recordingStream);
   } catch {
@@ -824,11 +827,6 @@ function startRecording() {
 
     stopRequested = true;
 
-    try {
-      recorder.requestData();
-    } catch {
-    }
-
     if (recorder.state === "recording") {
       recorder.stop();
     }
@@ -852,7 +850,7 @@ function startRecording() {
 
   recorder.onstop = () => {
     stopObserved = true;
-    scheduleFinalizeAfterStop(recordedChunks.length > 0 ? 120 : 450);
+    scheduleFinalizeAfterStop(recordedChunks.length > 0 ? 120 : 1800);
   };
 
   recorder.onerror = () => {
