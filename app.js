@@ -42,6 +42,7 @@ const resetBtn = document.getElementById("resetBtn");
 const copyBtn = document.getElementById("copyBtn");
 
 let cameraStream = null;
+let recordingStream = null;
 let mediaRecorder = null;
 let recordedChunks = [];
 let recordedVideoUrl = "";
@@ -625,6 +626,24 @@ function setRecordingButtons(isRecording) {
   recordStopBtn.disabled = !isRecording;
 }
 
+function getAudioTrackState(stream) {
+  const track = stream?.getAudioTracks?.()[0];
+  if (!track) {
+    return { hasAudioTrack: false, enabled: false, muted: true, readyState: "ended" };
+  }
+
+  return {
+    hasAudioTrack: true,
+    enabled: track.enabled,
+    muted: track.muted,
+    readyState: track.readyState,
+  };
+}
+
+function buildRecordingStream(stream) {
+  return new MediaStream([...stream.getVideoTracks(), ...stream.getAudioTracks()]);
+}
+
 function getSupportedMimeType() {
   const mimeTypes = [
     "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
@@ -653,7 +672,14 @@ async function enableCamera() {
   }
 
   try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
     cameraStream.getAudioTracks().forEach((track) => {
       if (!track.enabled) {
         track.enabled = true;
@@ -661,9 +687,11 @@ async function enableCamera() {
     });
     cameraPreview.srcObject = cameraStream;
 
-    const hasAudioTrack = cameraStream.getAudioTracks().length > 0;
-    if (!hasAudioTrack) {
+    const audioState = getAudioTrackState(cameraStream);
+    if (!audioState.hasAudioTrack) {
       setRecordStatus("Camera enabled, but microphone track is missing. Check mic permissions for this site.", "warning");
+    } else if (audioState.muted || !audioState.enabled || audioState.readyState !== "live") {
+      setRecordStatus("Camera enabled, but microphone is not active yet. Check browser mic permissions and input device.", "warning");
     } else {
       setRecordStatus("Camera and microphone enabled. Start recording when ready.", "success");
     }
@@ -707,13 +735,15 @@ function startRecording() {
   }
 
   const mimeType = getSupportedMimeType();
-  const hasAudioTrack = cameraStream.getAudioTracks().length > 0;
+  const audioState = getAudioTrackState(cameraStream);
 
   try {
+    recordingStream = buildRecordingStream(cameraStream);
     mediaRecorder = mimeType
-      ? new MediaRecorder(cameraStream, { mimeType })
-      : new MediaRecorder(cameraStream);
+      ? new MediaRecorder(recordingStream, { mimeType })
+      : new MediaRecorder(recordingStream);
   } catch {
+    recordingStream = null;
     setRecordStatus("Recording is not supported in this browser.", "error");
     return;
   }
@@ -730,12 +760,17 @@ function startRecording() {
 
   mediaRecorder.onstop = () => {
     const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "video/webm" });
+    recordingStream = null;
     if (blob.size > 0) {
       recordedVideoBlob = blob;
       uploadedVideoUrl = "";
       recordedVideoUrl = URL.createObjectURL(blob);
       videoUrlInput.value = "";
-      setRecordStatus("Recording ready. Generate a share link to upload it.", "success");
+      if (audioState.hasAudioTrack && audioState.enabled && !audioState.muted) {
+        setRecordStatus("Recording ready with microphone audio. Generate a share link to upload it.", "success");
+      } else {
+        setRecordStatus("Recording ready, but microphone audio may be missing. Check mic permissions if playback is silent.", "warning");
+      }
       syncRecordingControls();
       updatePreview();
     } else {
@@ -744,8 +779,14 @@ function startRecording() {
     setRecordingButtons(false);
   };
 
+  mediaRecorder.onerror = () => {
+    recordingStream = null;
+    setRecordingButtons(false);
+    setRecordStatus("Recording failed. Try again after checking camera and microphone permissions.", "error");
+  };
+
   mediaRecorder.start();
-  if (hasAudioTrack) {
+  if (audioState.hasAudioTrack && audioState.enabled && !audioState.muted && audioState.readyState === "live") {
     setRecordStatus("Recording in progress with microphone audio...", "info");
   } else {
     setRecordStatus("Recording in progress without microphone audio. Allow mic access to include sound.", "warning");
@@ -767,6 +808,10 @@ function stopCamera() {
   }
 
   cameraStream.getTracks().forEach((track) => track.stop());
+  if (recordingStream) {
+    recordingStream.getTracks().forEach((track) => track.stop());
+    recordingStream = null;
+  }
   cameraPreview.srcObject = null;
   cameraStream = null;
 }
