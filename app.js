@@ -348,6 +348,37 @@ function stateToQuery() {
   return params.toString();
 }
 
+function statePayload() {
+  return {
+    to: toNameInput.value.trim(),
+    from: fromNameInput.value.trim(),
+    headline: headlineInput.value.trim(),
+    msg: messageInput.value.trim(),
+    video: uploadedVideoUrl || videoUrlInput.value.trim(),
+  };
+}
+
+async function requestShortShareUrl() {
+  const response = await fetch(apiUrl("/api/share"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(statePayload()),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Share service failed with status ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (!payload.shareUrl || typeof payload.shareUrl !== "string") {
+    throw new Error("Share service did not return a valid URL");
+  }
+
+  return payload.shareUrl;
+}
+
 function loadStateFromQuery() {
   const params = new URLSearchParams(window.location.search);
   toNameInput.value = params.get("to") || "";
@@ -501,9 +532,13 @@ async function generateShareUrl() {
     }
   }
 
-  const query = stateToQuery();
-  const url = `${window.location.origin}${window.location.pathname}?${query}`;
-  shareUrlInput.value = url;
+  const fallbackUrl = `${window.location.origin}${window.location.pathname}?${stateToQuery()}`;
+
+  try {
+    shareUrlInput.value = await requestShortShareUrl();
+  } catch {
+    shareUrlInput.value = fallbackUrl;
+  }
   syncCopyButtonState();
   if (uploadedVideoUrl) {
     setCopyStatus("Link generated with uploaded camera video. Copy and send it.", "success");
