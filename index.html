@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SnuggleCard Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Nunito:wght@400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-left" aria-hidden="true"></div>
+    <div class="ambient ambient-right" aria-hidden="true"></div>
+
+    <main class="page">
+      <section class="intro">
+        <p class="eyebrow">Tiny moments, big feelings</p>
+        <h1>Make a Cute Video Card</h1>
+        <p class="intro-copy">
+          Record a sweet video, add your message, and send a little digital hug.
+          Your shared link opens as a clean card for the person you love.
+        </p>
+        <div class="hero-charms" aria-hidden="true">
+          <span class="charm charm-heart">heart</span>
+          <span class="charm charm-star">star</span>
+          <span class="charm charm-dot">dot</span>
+        </div>
+        <div class="mood-row" aria-hidden="true">
+          <span class="mood-pill">sparkly</span>
+          <span class="mood-pill">heartfelt</span>
+          <span class="mood-pill">made by you</span>
+        </div>
+      </section>
+
+      <section class="workspace" aria-label="Video card builder">
+        <form id="builder-form" class="panel form-panel" autocomplete="off">
+          <div class="form-heading">
+            <p class="section-kicker">Card Builder</p>
+            <h2>Create Your Card</h2>
+            <p class="form-lead">Shape the message first, then add the video moment that brings it to life.</p>
+          </div>
+
+          <section class="builder-guide" id="builderGuide">
+            <p class="guide-title">Quick Start</p>
+            <p id="builderGuideText" class="guide-copy">
+              Start with who it is for and who it is from, then add your message and choose a video source.
+            </p>
+          </section>
+
+          <section class="form-section" aria-labelledby="detailsSectionTitle">
+            <div class="section-heading">
+              <p class="section-kicker">Step 1</p>
+              <h3 id="detailsSectionTitle" class="section-title">Write the note</h3>
+            </div>
+
+            <div class="field-stack">
+              <label for="toName">To</label>
+              <input
+                id="toName"
+                name="toName"
+                type="text"
+                placeholder="Grandma, Alex, Team..."
+                maxlength="60"
+                aria-describedby="toNameHint toNameCounter"
+              />
+              <div class="field-meta">
+                <p id="toNameHint" class="hint">Who this video card is for.</p>
+                <p id="toNameCounter" class="char-counter">60 left</p>
+              </div>
+            </div>
+
+            <div class="split-fields">
+              <div class="field-stack">
+                <label for="fromName">From</label>
+                <input
+                  id="fromName"
+                  name="fromName"
+                  type="text"
+                  placeholder="Your name"
+                  maxlength="60"
+                  aria-describedby="fromNameHint fromNameCounter"
+                />
+                <div class="field-meta">
+                  <p id="fromNameHint" class="hint">Who is sending this card.</p>
+                  <p id="fromNameCounter" class="char-counter">60 left</p>
+                </div>
+              </div>
+
+              <div class="field-stack">
+                <label for="headline">Card headline</label>
+                <input
+                  id="headline"
+                  name="headline"
+                  type="text"
+                  placeholder="Happy Birthday!"
+                  maxlength="80"
+                  aria-describedby="headlineHint headlineCounter"
+                />
+                <div class="field-meta">
+                  <p id="headlineHint" class="hint">Keep it short and warm.</p>
+                  <p id="headlineCounter" class="char-counter">80 left</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="field-stack">
+              <label for="message">Personal message</label>
+              <textarea
+                id="message"
+                name="message"
+                rows="4"
+                maxlength="280"
+                placeholder="I made this little video to celebrate you..."
+                aria-describedby="messageHint messageCounter"
+              ></textarea>
+              <div class="field-meta">
+                <p id="messageHint" class="hint">Your personal note appears directly in the preview card.</p>
+                <p id="messageCounter" class="char-counter">280 left</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="form-section form-section-accent" aria-labelledby="videoSectionTitle">
+            <div class="section-heading">
+              <p class="section-kicker">Step 2</p>
+              <h3 id="videoSectionTitle" class="section-title">Add the video</h3>
+            </div>
+
+            <div class="field-stack">
+              <label for="videoUrl">Video URL (YouTube, Vimeo, MP4)</label>
+              <input
+                id="videoUrl"
+                name="videoUrl"
+                type="url"
+                placeholder="https://www.youtube.com/watch?v=..."
+                aria-describedby="videoUrlHint"
+              />
+              <p id="videoUrlHint" class="hint">
+                Paste a YouTube, Vimeo, or direct MP4/WebM/Ogg link.
+              </p>
+            </div>
+
+            <div class="camera-block" aria-label="Camera recorder">
+              <p class="camera-title">Or record something right here</p>
+              <video id="cameraPreview" class="camera-preview" autoplay muted playsinline></video>
+              <div class="camera-actions">
+                <button type="button" id="cameraEnableBtn" class="ghost">Enable Camera</button>
+                <button type="button" id="recordStartBtn" class="ghost">Start Recording</button>
+                <button type="button" id="recordStopBtn" class="ghost" disabled>Stop</button>
+                <button type="button" id="recordClearBtn" class="ghost">Clear Recording</button>
+              </div>
+              <p id="recordStatus" class="status" role="status" aria-live="polite"></p>
+            </div>
+          </section>
+
+          <section class="form-section share-section" aria-labelledby="shareSectionTitle">
+            <div class="section-heading">
+              <p class="section-kicker">Step 3</p>
+              <h3 id="shareSectionTitle" class="section-title">Generate and share</h3>
+            </div>
+
+            <div class="actions">
+              <button type="button" id="generateBtn">Generate Share Link</button>
+              <button type="button" id="resetBtn" class="ghost">Reset</button>
+            </div>
+
+            <label for="shareUrl">Share this link</label>
+            <div class="share-row">
+              <input id="shareUrl" name="shareUrl" type="text" readonly placeholder="Your generated card link appears here" />
+              <button
+                type="button"
+                id="copyBtn"
+                class="icon-button"
+                aria-label="Copy share URL to clipboard"
+                title="Copy share URL"
+              >
+                Copy
+              </button>
+            </div>
+            <p id="copyStatus" class="status" role="status" aria-live="polite"></p>
+            <p class="share-note">
+              Camera recordings upload when you generate the link. Start with
+              <code>node server.js</code> and open the local URL shown in your terminal.
+            </p>
+          </section>
+        </form>
+
+        <article class="panel preview-panel" aria-label="Card preview">
+          <p id="livePreviewStatus" class="sr-only" aria-live="polite" aria-atomic="true"></p>
+          <div class="card-shell">
+            <div class="card-ribbon" aria-hidden="true">for someone sweet</div>
+            <p class="to" id="previewTo">To someone special</p>
+            <h3 id="previewHeadline">Your Video Greeting</h3>
+            <p class="body" id="previewMessage">
+              Write a heartfelt message and add your video link to make this card
+              unforgettable.
+            </p>
+            <p class="from" id="previewFrom">From you</p>
+            <p class="preview-footnote" id="previewFootnote">Made with a little extra sweetness.</p>
+
+            <div class="video-wrap" id="videoWrap">
+              <div id="videoPlaceholder" class="video-placeholder">
+                <span class="placeholder-mark" aria-hidden="true">♡</span>
+                <strong class="placeholder-title">Your video moment goes here</strong>
+                <span class="placeholder-copy">Paste a link or record right in the builder to bring the card to life.</span>
+              </div>
+              <iframe
+                id="videoFrame"
+                title="Video preview"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen
+              ></iframe>
+              <video id="videoNative" controls></video>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
