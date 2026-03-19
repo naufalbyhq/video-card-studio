@@ -379,15 +379,57 @@ async function requestShortShareUrl() {
   return payload.shareUrl;
 }
 
-function loadStateFromQuery() {
-  const params = new URLSearchParams(window.location.search);
-  toNameInput.value = params.get("to") || "";
-  fromNameInput.value = params.get("from") || "";
-  headlineInput.value = params.get("headline") || "";
-  messageInput.value = params.get("msg") || "";
-  videoUrlInput.value = params.get("video") || "";
+function applyStateToForm(payload) {
+  toNameInput.value = payload.to || "";
+  fromNameInput.value = payload.from || "";
+  headlineInput.value = payload.headline || "";
+  messageInput.value = payload.msg || "";
+  videoUrlInput.value = payload.video || "";
+}
 
-  if (params.get("view") === "1") {
+async function loadStateFromQuery() {
+  const params = new URLSearchParams(window.location.search);
+  const shareId = (params.get("share") || "").trim();
+
+  if (shareId) {
+    try {
+      const response = await fetch(apiUrl(`/api/share/${encodeURIComponent(shareId)}`), {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (response.ok) {
+        const payload = await response.json();
+        applyStateToForm(payload);
+      } else {
+        applyStateToForm({
+          to: params.get("to") || "",
+          from: params.get("from") || "",
+          headline: params.get("headline") || "",
+          msg: params.get("msg") || "",
+          video: params.get("video") || "",
+        });
+      }
+    } catch {
+      applyStateToForm({
+        to: params.get("to") || "",
+        from: params.get("from") || "",
+        headline: params.get("headline") || "",
+        msg: params.get("msg") || "",
+        video: params.get("video") || "",
+      });
+    }
+  } else {
+    applyStateToForm({
+      to: params.get("to") || "",
+      from: params.get("from") || "",
+      headline: params.get("headline") || "",
+      msg: params.get("msg") || "",
+      video: params.get("video") || "",
+    });
+  }
+
+  if (params.get("view") === "1" || shareId) {
     document.body.classList.add("view-mode");
   }
 }
@@ -742,9 +784,12 @@ window.addEventListener("beforeunload", () => {
 });
 
 setRecordingButtons(false);
-loadStateFromQuery();
-updateCharCounters();
-updatePreview();
-syncCopyButtonState();
-syncRecordingControls();
-detectUploadBackendAvailability();
+loadStateFromQuery()
+  .catch(() => {})
+  .finally(() => {
+    updateCharCounters();
+    updatePreview();
+    syncCopyButtonState();
+    syncRecordingControls();
+    detectUploadBackendAvailability();
+  });

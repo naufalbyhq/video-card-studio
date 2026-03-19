@@ -58,7 +58,13 @@ if (!fs.existsSync(uploadDir)) {
 
 const shareCards = new Map();
 
-if (fs.existsSync(shareCardsFile)) {
+function loadShareCardsFromDisk() {
+  shareCards.clear();
+
+  if (!fs.existsSync(shareCardsFile)) {
+    return;
+  }
+
   try {
     const parsed = JSON.parse(fs.readFileSync(shareCardsFile, "utf8"));
     if (parsed && typeof parsed === "object") {
@@ -70,6 +76,8 @@ if (fs.existsSync(shareCardsFile)) {
     console.warn("Could not load persisted share cards; starting fresh.");
   }
 }
+
+loadShareCardsFromDisk();
 
 function defaultHeaders() {
   return {
@@ -204,7 +212,11 @@ function parseContentType(headerValue) {
 
 function persistShareCards() {
   const serializable = Object.fromEntries(shareCards.entries());
-  fs.writeFile(shareCardsFile, JSON.stringify(serializable), () => {});
+  try {
+    fs.writeFileSync(shareCardsFile, JSON.stringify(serializable));
+  } catch {
+    console.warn("Could not persist share cards to disk.");
+  }
 }
 
 function generateShareId() {
@@ -225,17 +237,6 @@ function getPublicBaseUrl(request) {
   const forwardedProto = String(request.headers["x-forwarded-proto"] || "").split(",")[0].trim();
   const protocol = forwardedProto || "http";
   return `${protocol}://${hostHeader}`;
-}
-
-function buildShareQuery(record) {
-  const params = new URLSearchParams();
-  params.set("view", "1");
-  params.set("to", record.to || "");
-  params.set("from", record.from || "");
-  params.set("headline", record.headline || "");
-  params.set("msg", record.msg || "");
-  params.set("video", record.video || "");
-  return params.toString();
 }
 
 function readJsonBody(request, maxBytes) {
@@ -565,17 +566,42 @@ async function handleCreateShare(request, response) {
 function handleShareRedirect(request, response, url) {
   const segments = url.pathname.split("/").filter(Boolean);
   const shareId = segments[1] || "";
-  const record = shareCards.get(shareId);
+  let record = shareCards.get(shareId);
+
+  if (!record) {
+    loadShareCardsFromDisk();
+    record = shareCards.get(shareId);
+  }
 
   if (!record) {
     sendText(response, 404, "Share link not found");
     return;
   }
 
-  const query = buildShareQuery(record);
   writeResponse(response, 302, {
     "Cache-Control": "no-store",
-    Location: `/?${query}`,
+    Location: `/?view=1&share=${encodeURIComponent(shareId)}`,
+  });
+}
+
+function handleGetShare(response, url) {
+  const segments = url.pathname.split("/").filter(Boolean);
+  const shareId = segments[2] || "";
+  let record = shareCards.get(shareId);
+
+  if (!record) {
+    loadShareCardsFromDisk();
+    record = shareCards.get(shareId);
+  }
+
+  if (!record) {
+    sendJson(response, 404, { error: "Share not found" });
+    return;
+  }
+
+  sendJson(response, 200, {
+    id: shareId,
+    ...record,
   });
 }
 
@@ -646,7 +672,12 @@ const server = http.createServer((request, response) => {
     return;
   }
 
-  if (request.method === "GET" && url.pathname.startsWith("/s/")) {
+  if (request.method === "GET" && url.pathname.startsWith("/api/share/")) {
+    handleGetShare(response, url);
+    return;
+  }
+
+  if ((request.method === "GET" || request.method === "HEAD") && url.pathname.startsWith("/s/")) {
     handleShareRedirect(request, response, url);
     return;
   }
