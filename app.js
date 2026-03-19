@@ -372,11 +372,11 @@ async function requestShortShareUrl() {
   }
 
   const payload = await response.json();
-  if (!payload.shareUrl || typeof payload.shareUrl !== "string") {
-    throw new Error("Share service did not return a valid URL");
+  if (!payload.id || typeof payload.id !== "string") {
+    throw new Error("Share service did not return a valid id");
   }
 
-  return payload.shareUrl;
+  return `${window.location.origin}${window.location.pathname}?view=1&share=${encodeURIComponent(payload.id)}`;
 }
 
 function applyStateToForm(payload) {
@@ -626,7 +626,13 @@ function setRecordingButtons(isRecording) {
 }
 
 function getSupportedMimeType() {
-  const mimeTypes = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"];
+  const mimeTypes = [
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4",
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+  ];
   return mimeTypes.find((item) => MediaRecorder.isTypeSupported(item)) || "";
 }
 
@@ -648,8 +654,19 @@ async function enableCamera() {
 
   try {
     cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    cameraStream.getAudioTracks().forEach((track) => {
+      if (!track.enabled) {
+        track.enabled = true;
+      }
+    });
     cameraPreview.srcObject = cameraStream;
-    setRecordStatus("Camera enabled. Start recording when ready.", "success");
+
+    const hasAudioTrack = cameraStream.getAudioTracks().length > 0;
+    if (!hasAudioTrack) {
+      setRecordStatus("Camera enabled, but microphone track is missing. Check mic permissions for this site.", "warning");
+    } else {
+      setRecordStatus("Camera and microphone enabled. Start recording when ready.", "success");
+    }
   } catch {
     setRecordStatus("Camera permission denied or unavailable.", "error");
   }
@@ -690,6 +707,7 @@ function startRecording() {
   }
 
   const mimeType = getSupportedMimeType();
+  const hasAudioTrack = cameraStream.getAudioTracks().length > 0;
 
   try {
     mediaRecorder = mimeType
@@ -727,7 +745,11 @@ function startRecording() {
   };
 
   mediaRecorder.start();
-  setRecordStatus("Recording in progress...", "info");
+  if (hasAudioTrack) {
+    setRecordStatus("Recording in progress with microphone audio...", "info");
+  } else {
+    setRecordStatus("Recording in progress without microphone audio. Allow mic access to include sound.", "warning");
+  }
 }
 
 function stopRecording() {
