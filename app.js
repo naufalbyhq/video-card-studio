@@ -46,6 +46,7 @@ let recordingStream = null;
 let mediaRecorder = null;
 let recordedChunks = [];
 let finalizeCurrentRecording = null;
+let requestStopCurrentRecording = null;
 let recordedVideoUrl = "";
 let recordedVideoBlob = null;
 let uploadedVideoUrl = "";
@@ -755,13 +756,41 @@ function startRecording() {
 
   const recorder = mediaRecorder;
   let finalized = false;
+  let stopRequested = false;
+  let stopObserved = false;
+  let postStopTimerId = null;
+  let emergencyFinalizeTimerId = null;
+
+  const clearFinalizeTimers = () => {
+    if (postStopTimerId) {
+      clearTimeout(postStopTimerId);
+      postStopTimerId = null;
+    }
+    if (emergencyFinalizeTimerId) {
+      clearTimeout(emergencyFinalizeTimerId);
+      emergencyFinalizeTimerId = null;
+    }
+  };
+
+  const scheduleFinalizeAfterStop = (delayMs) => {
+    if (postStopTimerId) {
+      clearTimeout(postStopTimerId);
+    }
+    postStopTimerId = setTimeout(() => {
+      if (stopRequested && stopObserved) {
+        finalizeRecording(recorder.mimeType || "video/webm");
+      }
+    }, delayMs);
+  };
 
   const finalizeRecording = (recorderMimeType) => {
     if (finalized) {
       return;
     }
     finalized = true;
+    clearFinalizeTimers();
     finalizeCurrentRecording = null;
+    requestStopCurrentRecording = null;
 
     const blob = new Blob(recordedChunks, { type: recorderMimeType || "video/webm" });
     recordingStream = null;
@@ -786,19 +815,48 @@ function startRecording() {
   };
 
   finalizeCurrentRecording = finalizeRecording;
+  requestStopCurrentRecording = () => {
+    if (stopRequested) {
+      return;
+    }
+
+    stopRequested = true;
+
+    try {
+      recorder.requestData();
+    } catch {
+    }
+
+    if (recorder.state === "recording") {
+      recorder.stop();
+    }
+
+    emergencyFinalizeTimerId = setTimeout(() => {
+      if (!finalized) {
+        finalizeRecording(recorder.mimeType || "video/webm");
+      }
+    }, 5000);
+  };
 
   recorder.ondataavailable = (event) => {
     if (event.data && event.data.size > 0) {
       recordedChunks.push(event.data);
+
+      if (stopRequested && stopObserved) {
+        scheduleFinalizeAfterStop(120);
+      }
     }
   };
 
   recorder.onstop = () => {
-    finalizeRecording(recorder.mimeType || "video/webm");
+    stopObserved = true;
+    scheduleFinalizeAfterStop(recordedChunks.length > 0 ? 120 : 450);
   };
 
   recorder.onerror = () => {
+    clearFinalizeTimers();
     finalizeCurrentRecording = null;
+    requestStopCurrentRecording = null;
     finalized = true;
     recordingStream = null;
     mediaRecorder = null;
@@ -827,19 +885,12 @@ function stopRecording() {
 
   setRecordStatus("Finalizing recording...", "info");
 
-  try {
-    mediaRecorder.requestData();
-  } catch {
+  if (requestStopCurrentRecording) {
+    requestStopCurrentRecording();
+    return;
   }
 
-  const recorder = mediaRecorder;
   mediaRecorder.stop();
-
-  setTimeout(() => {
-    if (finalizeCurrentRecording && recorder.state !== "recording") {
-      finalizeCurrentRecording(recorder.mimeType || "video/webm");
-    }
-  }, 1200);
 }
 
 function stopCamera() {
