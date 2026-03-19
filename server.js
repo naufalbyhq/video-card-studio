@@ -247,6 +247,7 @@ function serveFile(filePath, response, method, requestHeaders) {
     const etag = makeWeakEtag(stat);
     const lastModified = stat.mtime.toUTCString();
     const cacheControl = getCacheControl(filePath, extension);
+    const fileIsUpload = filePath.startsWith(`${uploadDir}${path.sep}`);
 
     const requestEtag = requestHeaders["if-none-match"];
     const requestModifiedSince = requestHeaders["if-modified-since"];
@@ -269,6 +270,7 @@ function serveFile(filePath, response, method, requestHeaders) {
       "Content-Length": stat.size,
       ETag: etag,
       "Last-Modified": lastModified,
+      "Cross-Origin-Resource-Policy": fileIsUpload ? "cross-origin" : "same-origin",
     };
 
     if (method === "HEAD") {
