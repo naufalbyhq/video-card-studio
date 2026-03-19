@@ -743,9 +743,10 @@ function startRecording() {
   const mimeType = getSupportedMimeType();
   const audioState = getAudioTrackState(cameraStream);
   const shouldForceMimeType = Boolean(mimeType) && !isAppleMobile;
+  const useIosRecorderMode = isAppleMobile;
 
   try {
-    recordingStream = buildRecordingStream(cameraStream);
+    recordingStream = useIosRecorderMode ? cameraStream : buildRecordingStream(cameraStream);
     mediaRecorder = shouldForceMimeType
       ? new MediaRecorder(recordingStream, { mimeType })
       : new MediaRecorder(recordingStream);
@@ -765,6 +766,7 @@ function startRecording() {
   let stopObserved = false;
   let postStopTimerId = null;
   let emergencyFinalizeTimerId = null;
+  let flushIntervalId = null;
 
   const clearFinalizeTimers = () => {
     if (postStopTimerId) {
@@ -774,6 +776,10 @@ function startRecording() {
     if (emergencyFinalizeTimerId) {
       clearTimeout(emergencyFinalizeTimerId);
       emergencyFinalizeTimerId = null;
+    }
+    if (flushIntervalId) {
+      clearInterval(flushIntervalId);
+      flushIntervalId = null;
     }
   };
 
@@ -828,7 +834,20 @@ function startRecording() {
     stopRequested = true;
 
     if (recorder.state === "recording") {
-      recorder.stop();
+      if (useIosRecorderMode) {
+        try {
+          recorder.requestData();
+        } catch {
+        }
+
+        setTimeout(() => {
+          if (recorder.state === "recording") {
+            recorder.stop();
+          }
+        }, 150);
+      } else {
+        recorder.stop();
+      }
     }
 
     emergencyFinalizeTimerId = setTimeout(() => {
@@ -864,7 +883,21 @@ function startRecording() {
     setRecordStatus("Recording failed. Try again after checking camera and microphone permissions.", "error");
   };
 
-  recorder.start(recordingChunkIntervalMs);
+  if (useIosRecorderMode) {
+    recorder.start();
+    flushIntervalId = setInterval(() => {
+      if (recorder.state !== "recording") {
+        return;
+      }
+
+      try {
+        recorder.requestData();
+      } catch {
+      }
+    }, 1000);
+  } else {
+    recorder.start(recordingChunkIntervalMs);
+  }
   if (audioState.hasAudioTrack && audioState.enabled && !audioState.muted && audioState.readyState === "live") {
     setRecordStatus("Recording in progress with microphone audio...", "info");
   } else {
