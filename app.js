@@ -45,6 +45,7 @@ let cameraStream = null;
 let recordingStream = null;
 let mediaRecorder = null;
 let recordedChunks = [];
+let finalizeCurrentRecording = null;
 let recordedVideoUrl = "";
 let recordedVideoBlob = null;
 let uploadedVideoUrl = "";
@@ -752,15 +753,20 @@ function startRecording() {
   clearRecording();
   setRecordingButtons(true);
 
-  mediaRecorder.ondataavailable = (event) => {
-    if (event.data && event.data.size > 0) {
-      recordedChunks.push(event.data);
-    }
-  };
+  const recorder = mediaRecorder;
+  let finalized = false;
 
-  mediaRecorder.onstop = () => {
-    const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || "video/webm" });
+  const finalizeRecording = (recorderMimeType) => {
+    if (finalized) {
+      return;
+    }
+    finalized = true;
+    finalizeCurrentRecording = null;
+
+    const blob = new Blob(recordedChunks, { type: recorderMimeType || "video/webm" });
     recordingStream = null;
+    mediaRecorder = null;
+
     if (blob.size > 0) {
       recordedVideoBlob = blob;
       uploadedVideoUrl = "";
@@ -779,13 +785,28 @@ function startRecording() {
     setRecordingButtons(false);
   };
 
-  mediaRecorder.onerror = () => {
+  finalizeCurrentRecording = finalizeRecording;
+
+  recorder.ondataavailable = (event) => {
+    if (event.data && event.data.size > 0) {
+      recordedChunks.push(event.data);
+    }
+  };
+
+  recorder.onstop = () => {
+    finalizeRecording(recorder.mimeType || "video/webm");
+  };
+
+  recorder.onerror = () => {
+    finalizeCurrentRecording = null;
+    finalized = true;
     recordingStream = null;
+    mediaRecorder = null;
     setRecordingButtons(false);
     setRecordStatus("Recording failed. Try again after checking camera and microphone permissions.", "error");
   };
 
-  mediaRecorder.start();
+  recorder.start();
   if (audioState.hasAudioTrack && audioState.enabled && !audioState.muted && audioState.readyState === "live") {
     setRecordStatus("Recording in progress with microphone audio...", "info");
   } else {
@@ -795,11 +816,30 @@ function startRecording() {
 
 function stopRecording() {
   if (!mediaRecorder || mediaRecorder.state !== "recording") {
+    if (finalizeCurrentRecording) {
+      setRecordStatus("Finalizing recording... please wait.", "info");
+      return;
+    }
+
     setRecordStatus("No active recording.", "warning");
     return;
   }
 
+  setRecordStatus("Finalizing recording...", "info");
+
+  try {
+    mediaRecorder.requestData();
+  } catch {
+  }
+
+  const recorder = mediaRecorder;
   mediaRecorder.stop();
+
+  setTimeout(() => {
+    if (finalizeCurrentRecording && recorder.state !== "recording") {
+      finalizeCurrentRecording(recorder.mimeType || "video/webm");
+    }
+  }, 1200);
 }
 
 function stopCamera() {
