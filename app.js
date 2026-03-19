@@ -56,6 +56,8 @@ let activePreviewVideoType = "none";
 let activePreviewVideoUrl = "";
 let lastAnnouncedPreviewState = "";
 
+const recordingChunkIntervalMs = 500;
+
 const defaultState = {
   toName: "To someone special",
   fromName: "From you",
@@ -864,7 +866,7 @@ function startRecording() {
     setRecordStatus("Recording failed. Try again after checking camera and microphone permissions.", "error");
   };
 
-  recorder.start();
+  recorder.start(recordingChunkIntervalMs);
   if (audioState.hasAudioTrack && audioState.enabled && !audioState.muted && audioState.readyState === "live") {
     setRecordStatus("Recording in progress with microphone audio...", "info");
   } else {
