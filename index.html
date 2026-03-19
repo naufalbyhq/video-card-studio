@@ -147,6 +147,7 @@
             <div class="camera-block" aria-label="Camera recorder">
               <p class="camera-title">Or record something right here</p>
               <video id="cameraPreview" class="camera-preview" autoplay muted playsinline></video>
+              <input id="nativeRecorderInput" type="file" accept="video/*" capture="user" hidden />
               <div class="camera-actions">
                 <button type="button" id="cameraEnableBtn" class="ghost">Enable Camera</button>
                 <button type="button" id="recordStartBtn" class="ghost">Start Recording</button>

@@ -26,6 +26,7 @@ const cameraEnableBtn = document.getElementById("cameraEnableBtn");
 const recordStartBtn = document.getElementById("recordStartBtn");
 const recordStopBtn = document.getElementById("recordStopBtn");
 const recordClearBtn = document.getElementById("recordClearBtn");
+const nativeRecorderInput = document.getElementById("nativeRecorderInput");
 
 const previewTo = document.getElementById("previewTo");
 const previewFrom = document.getElementById("previewFrom");
@@ -59,6 +60,7 @@ let lastAnnouncedPreviewState = "";
 const recordingChunkIntervalMs = 500;
 const isAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent)
   || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const useNativeCaptureMode = isAppleMobile;
 
 const defaultState = {
   toName: "To someone special",
@@ -628,6 +630,12 @@ function resetAll() {
 }
 
 function setRecordingButtons(isRecording) {
+  if (useNativeCaptureMode) {
+    recordStartBtn.disabled = false;
+    recordStopBtn.disabled = true;
+    return;
+  }
+
   recordStartBtn.disabled = isRecording;
   recordStopBtn.disabled = !isRecording;
 }
@@ -726,6 +734,18 @@ function clearRecording() {
 }
 
 function startRecording() {
+  if (useNativeCaptureMode) {
+    if (!nativeRecorderInput) {
+      setRecordStatus("Native camera capture is unavailable on this browser.", "error");
+      return;
+    }
+
+    setRecordStatus("Opening camera capture...", "info");
+    nativeRecorderInput.value = "";
+    nativeRecorderInput.click();
+    return;
+  }
+
   if (!uploadBackendAvailable) {
     setRecordStatus("Camera upload is disabled on this deployment. Use a video URL instead.", "warning");
     return;
@@ -906,6 +926,11 @@ function startRecording() {
 }
 
 function stopRecording() {
+  if (useNativeCaptureMode) {
+    setRecordStatus("In iPhone mode, use Open Camera to record and finish from the native recorder.", "info");
+    return;
+  }
+
   if (!mediaRecorder || mediaRecorder.state !== "recording") {
     if (finalizeCurrentRecording) {
       setRecordStatus("Finalizing recording... please wait.", "info");
@@ -924,6 +949,28 @@ function stopRecording() {
   }
 
   mediaRecorder.stop();
+}
+
+function handleNativeCaptureSelection() {
+  const selectedFile = nativeRecorderInput?.files?.[0];
+  if (!selectedFile) {
+    setRecordStatus("No video selected. Tap Open Camera to try again.", "warning");
+    return;
+  }
+
+  if (!selectedFile.type || !selectedFile.type.startsWith("video/")) {
+    setRecordStatus("Selected file is not a video. Please record a video clip.", "warning");
+    return;
+  }
+
+  clearRecording();
+  recordedVideoBlob = selectedFile;
+  uploadedVideoUrl = "";
+  recordedVideoUrl = URL.createObjectURL(selectedFile);
+  videoUrlInput.value = "";
+  syncRecordingControls();
+  updatePreview();
+  setRecordStatus("Recording ready. Generate a share link to upload it.", "success");
 }
 
 function stopCamera() {
@@ -967,6 +1014,10 @@ recordClearBtn.addEventListener("click", () => {
   clearRecording();
 });
 
+if (nativeRecorderInput) {
+  nativeRecorderInput.addEventListener("change", handleNativeCaptureSelection);
+}
+
 window.addEventListener("beforeunload", () => {
   stopCamera();
   if (recordedVideoUrl) {
@@ -975,6 +1026,11 @@ window.addEventListener("beforeunload", () => {
 });
 
 setRecordingButtons(false);
+if (useNativeCaptureMode) {
+  recordStartBtn.textContent = "Open Camera";
+  cameraEnableBtn.disabled = true;
+  setRecordStatus("iPhone mode: use Open Camera to record reliably.", "info");
+}
 loadStateFromQuery()
   .catch(() => {})
   .finally(() => {
