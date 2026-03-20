@@ -477,19 +477,21 @@ function uploadSetupHint() {
 
 function setRecordingAvailability(isAvailable) {
   uploadBackendAvailable = isAvailable;
+  const controlsDisabled = useNativeCaptureMode;
 
   if (isAvailable) {
-    cameraEnableBtn.disabled = false;
+    cameraEnableBtn.disabled = controlsDisabled;
     if (recordBackgroundPreset) {
-      recordBackgroundPreset.disabled = false;
+      recordBackgroundPreset.disabled = controlsDisabled;
     }
     if (recordBackgroundUpload) {
-      recordBackgroundUpload.disabled = false;
+      recordBackgroundUpload.disabled = controlsDisabled;
     }
     if (recordBackgroundSoftness) {
-      recordBackgroundSoftness.disabled = false;
+      recordBackgroundSoftness.disabled = controlsDisabled;
     }
     syncRecordingControls();
+    setRecordingButtons(false);
     if (cameraBlock) {
       cameraBlock.classList.remove("disabled");
     }
@@ -499,29 +501,26 @@ function setRecordingAvailability(isAvailable) {
     return;
   }
 
-  stopCamera();
-  setRecordingButtons(false);
-  cameraEnableBtn.disabled = true;
+  cameraEnableBtn.disabled = controlsDisabled;
   if (recordBackgroundPreset) {
-    recordBackgroundPreset.disabled = true;
+    recordBackgroundPreset.disabled = controlsDisabled;
   }
   if (recordBackgroundUpload) {
-    recordBackgroundUpload.disabled = true;
+    recordBackgroundUpload.disabled = controlsDisabled;
   }
   if (recordBackgroundSoftness) {
-    recordBackgroundSoftness.disabled = true;
+    recordBackgroundSoftness.disabled = controlsDisabled;
   }
-  recordStartBtn.disabled = true;
-  recordStopBtn.disabled = true;
-  recordClearBtn.disabled = true;
+  setRecordingButtons(false);
+  syncRecordingControls();
 
   if (cameraBlock) {
-    cameraBlock.classList.add("disabled");
+    cameraBlock.classList.remove("disabled");
   }
 
-  setRecordStatus("Camera recording upload is unavailable on this deployment. Use a video URL instead.", "warning");
+  setRecordStatus("You can still record, but uploading recorded clips is unavailable on this deployment.", "warning");
   if (shareNote) {
-    shareNote.textContent = "This hosted version supports shareable links from URL videos. Camera upload sharing requires a Node server runtime.";
+    shareNote.textContent = "Recording works locally. To share recorded clips via link, run the Node server upload backend.";
   }
 }
 
@@ -679,13 +678,13 @@ function setRecordingButtons(isRecording) {
   recordStartBtn.disabled = isRecording;
   recordStopBtn.disabled = !isRecording;
   if (recordBackgroundPreset) {
-    recordBackgroundPreset.disabled = isRecording || !uploadBackendAvailable;
+    recordBackgroundPreset.disabled = isRecording;
   }
   if (recordBackgroundUpload) {
-    recordBackgroundUpload.disabled = isRecording || !uploadBackendAvailable;
+    recordBackgroundUpload.disabled = isRecording;
   }
   if (recordBackgroundSoftness) {
-    recordBackgroundSoftness.disabled = isRecording || !uploadBackendAvailable;
+    recordBackgroundSoftness.disabled = isRecording;
   }
 }
 
@@ -1080,11 +1079,6 @@ function getSupportedMimeType() {
 }
 
 async function enableCamera() {
-  if (!uploadBackendAvailable) {
-    setRecordStatus("Camera upload is disabled on this deployment. Use a video URL instead.", "warning");
-    return;
-  }
-
   if (!navigator.mediaDevices?.getUserMedia) {
     setRecordStatus("Camera API is not available in this browser.", "error");
     return;
@@ -1160,11 +1154,6 @@ async function startRecording() {
     setRecordStatus("Opening camera capture...", "info");
     nativeRecorderInput.value = "";
     nativeRecorderInput.click();
-    return;
-  }
-
-  if (!uploadBackendAvailable) {
-    setRecordStatus("Camera upload is disabled on this deployment. Use a video URL instead.", "warning");
     return;
   }
 
@@ -1262,7 +1251,11 @@ async function startRecording() {
       recordedVideoUrl = URL.createObjectURL(blob);
       videoUrlInput.value = "";
       if (audioState.hasAudioTrack && audioState.enabled && !audioState.muted) {
-        setRecordStatus("Recording ready with microphone audio. Generate a share link to upload it.", "success");
+        if (uploadBackendAvailable) {
+          setRecordStatus("Recording ready with microphone audio. Generate a share link to upload it.", "success");
+        } else {
+          setRecordStatus("Recording ready with microphone audio. Upload is unavailable here, but local playback works.", "info");
+        }
       } else {
         setRecordStatus("Recording ready, but microphone audio may be missing. Check mic permissions if playback is silent.", "warning");
       }
@@ -1399,7 +1392,11 @@ function handleNativeCaptureSelection() {
   videoUrlInput.value = "";
   syncRecordingControls();
   updatePreview();
-  setRecordStatus("Recording ready. Generate a share link to upload it.", "success");
+  if (uploadBackendAvailable) {
+    setRecordStatus("Recording ready. Generate a share link to upload it.", "success");
+  } else {
+    setRecordStatus("Recording ready. Upload is unavailable here, but local playback works.", "info");
+  }
 }
 
 function stopCamera() {
