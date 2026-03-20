@@ -14,9 +14,7 @@ const shareNote = document.getElementById("shareNote");
 const cameraBlock = document.querySelector(".camera-block");
 
 const configuredApiOrigin = String(window.__VIDEO_CARD_API_ORIGIN__ || "").trim();
-const productionApiOrigin = "https://video-card-api-production.up.railway.app";
-const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-const apiOrigin = configuredApiOrigin || (!isLocalHost ? productionApiOrigin : "");
+const apiOrigin = configuredApiOrigin;
 
 const toNameCounter = document.getElementById("toNameCounter");
 const fromNameCounter = document.getElementById("fromNameCounter");
@@ -473,8 +471,11 @@ function apiUrl(path) {
 }
 
 function uploadSetupHint() {
-  const origin = window.location.origin && window.location.origin !== "null" ? window.location.origin : "http://127.0.0.1:3000";
-  return `Start this app with \`node server.js\` and open ${origin}.`;
+  if (apiOrigin) {
+    return `Configured API origin (${apiOrigin}) is unreachable. Check deployment and CORS settings.`;
+  }
+
+  return "Deploy same-origin API routes (/api/upload, /api/share, /api/healthz) and configure Supabase env vars.";
 }
 
 function setRecordingAvailability(isAvailable) {
@@ -522,7 +523,7 @@ function setRecordingAvailability(isAvailable) {
 
   setRecordStatus("You can still record, but uploading recorded clips is unavailable on this deployment.", "warning");
   if (shareNote) {
-    shareNote.textContent = "Recording works locally. To share recorded clips via link, run the Node server upload backend.";
+    shareNote.textContent = "Recorded video upload requires the Supabase-backed API routes to be deployed and configured.";
   }
 }
 
@@ -532,16 +533,18 @@ async function detectUploadBackendAvailability() {
     return;
   }
 
-  if (apiOrigin) {
-    setRecordingAvailability(true);
-    return;
-  }
-
   try {
-    const response = await fetch(apiUrl("/api/healthz"), {
+    let response = await fetch(apiUrl("/api/healthz"), {
       method: "GET",
       cache: "no-store",
     });
+
+    if (!response.ok) {
+      response = await fetch(apiUrl("/healthz"), {
+        method: "GET",
+        cache: "no-store",
+      });
+    }
 
     setRecordingAvailability(response.ok);
   } catch {
