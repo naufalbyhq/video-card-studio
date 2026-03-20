@@ -14,7 +14,9 @@ const shareNote = document.getElementById("shareNote");
 const cameraBlock = document.querySelector(".camera-block");
 
 const configuredApiOrigin = String(window.__VIDEO_CARD_API_ORIGIN__ || "").trim();
-const apiOrigin = configuredApiOrigin;
+const productionApiOrigin = "https://video-card-api-production.up.railway.app";
+const isHostedVercel = window.location.hostname.endsWith("vercel.app");
+const apiOrigin = configuredApiOrigin || (isHostedVercel ? productionApiOrigin : "");
 
 const toNameCounter = document.getElementById("toNameCounter");
 const fromNameCounter = document.getElementById("fromNameCounter");
@@ -531,10 +533,18 @@ async function detectUploadBackendAvailability() {
   }
 
   try {
-    const response = await fetch(apiUrl("/api/healthz"), {
+    let response = await fetch(apiUrl("/api/healthz"), {
       method: "GET",
       cache: "no-store",
     });
+
+    if (!response.ok && apiOrigin) {
+      response = await fetch(apiUrl("/healthz"), {
+        method: "GET",
+        cache: "no-store",
+      });
+    }
+
     setRecordingAvailability(response.ok);
   } catch {
     setRecordingAvailability(false);
