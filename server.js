@@ -49,6 +49,7 @@ const allowedCorsOrigins = new Set([
   "http://127.0.0.1:3000",
   "https://video-card-studio.vercel.app",
   "https://video-card-studio-naufalbayhaqis-projects.vercel.app",
+  "https://vcard.zhio.site",
   ...envCorsOrigins,
 ]);
 
