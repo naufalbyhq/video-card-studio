@@ -773,17 +773,21 @@ h3 {
   }
 }
 
+html.view-mode-preload .intro,
+html.view-mode-preload .form-panel,
 body.view-mode .intro,
 body.view-mode .form-panel {
   display: none;
 }
 
+html.view-mode-preload .workspace,
 body.view-mode .workspace {
   grid-template-columns: 1fr;
   max-width: 820px;
   margin: 8vh auto 0;
 }
 
+html.view-mode-preload .preview-panel,
 body.view-mode .preview-panel {
   min-height: 70vh;
 }
