@@ -146,6 +146,32 @@
 
             <div class="camera-block" aria-label="Camera recorder">
               <p class="camera-title">Or record something right here</p>
+              <div class="background-controls" aria-label="Recording background controls">
+                <div class="field-stack">
+                  <label for="recordBackgroundPreset">Recording background</label>
+                  <select id="recordBackgroundPreset" name="recordBackgroundPreset" aria-describedby="recordBackgroundHint">
+                    <option value="none">No custom background</option>
+                    <option value="sunset">Sunset Glow</option>
+                    <option value="meadow">Mint Meadow</option>
+                    <option value="midnight">Midnight Blue</option>
+                  </select>
+                </div>
+                <div class="field-stack">
+                  <label for="recordBackgroundUpload">Custom image</label>
+                  <input id="recordBackgroundUpload" name="recordBackgroundUpload" type="file" accept="image/*" />
+                </div>
+                <div class="field-stack">
+                  <label for="recordBackgroundSoftness">Edge softness</label>
+                  <select id="recordBackgroundSoftness" name="recordBackgroundSoftness">
+                    <option value="soft">Soft</option>
+                    <option value="balanced" selected>Balanced</option>
+                    <option value="strong">Strong</option>
+                  </select>
+                </div>
+                <p id="recordBackgroundHint" class="hint">
+                  Applies to camera recordings. On iPhone native capture, background effects are not applied.
+                </p>
+              </div>
               <video id="cameraPreview" class="camera-preview" autoplay muted playsinline></video>
               <input id="nativeRecorderInput" type="file" accept="video/*" capture="user" hidden />
               <div class="camera-actions">
@@ -214,13 +240,16 @@
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowfullscreen
               ></iframe>
-              <video id="videoNative" controls></video>
+              <video id="videoNative" controls>
+                <track kind="captions" srclang="en" label="English" src="data:text/vtt,WEBVTT" default />
+              </video>
             </div>
           </div>
         </article>
       </section>
     </main>
 
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

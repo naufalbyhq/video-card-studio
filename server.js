@@ -91,12 +91,12 @@ function defaultHeaders() {
       "base-uri 'self'",
       "form-action 'self'",
       "frame-ancestors 'self'",
-      "script-src 'self'",
+      "script-src 'self' https://cdn.jsdelivr.net",
       "style-src 'self' https://fonts.googleapis.com",
       "font-src 'self' https://fonts.gstatic.com",
       "img-src 'self' data:",
       "media-src 'self' blob: https:",
-      "connect-src 'self'",
+      "connect-src 'self' https://cdn.jsdelivr.net",
       "frame-src https://www.youtube.com https://player.vimeo.com",
     ].join("; "),
   };
@@ -628,7 +628,11 @@ const server = http.createServer((request, response) => {
     return;
   }
 
-  const isCorsSensitiveRoute = url.pathname === "/api/upload" || url.pathname === "/api/share" || url.pathname === "/healthz";
+  const isCorsSensitiveRoute =
+    url.pathname === "/api/upload"
+    || url.pathname === "/api/share"
+    || url.pathname === "/healthz"
+    || url.pathname === "/api/healthz";
   if (request.headers.origin && corsHeaders === null && isCorsSensitiveRoute) {
     sendText(response, 403, "CORS origin not allowed");
     return;
@@ -646,7 +650,7 @@ const server = http.createServer((request, response) => {
     return;
   }
 
-  if (request.method === "GET" && url.pathname === "/healthz") {
+  if (request.method === "GET" && (url.pathname === "/healthz" || url.pathname === "/api/healthz")) {
     sendJson(
       response,
       200,

@@ -13,8 +13,8 @@ const livePreviewStatus = document.getElementById("livePreviewStatus");
 const shareNote = document.getElementById("shareNote");
 const cameraBlock = document.querySelector(".camera-block");
 
-const railwayApiOrigin = "https://video-card-api-production.up.railway.app";
-const apiOrigin = window.location.hostname.endsWith("vercel.app") ? railwayApiOrigin : "";
+const configuredApiOrigin = String(window.__VIDEO_CARD_API_ORIGIN__ || "").trim();
+const apiOrigin = configuredApiOrigin;
 
 const toNameCounter = document.getElementById("toNameCounter");
 const fromNameCounter = document.getElementById("fromNameCounter");
@@ -27,6 +27,9 @@ const recordStartBtn = document.getElementById("recordStartBtn");
 const recordStopBtn = document.getElementById("recordStopBtn");
 const recordClearBtn = document.getElementById("recordClearBtn");
 const nativeRecorderInput = document.getElementById("nativeRecorderInput");
+const recordBackgroundPreset = document.getElementById("recordBackgroundPreset");
+const recordBackgroundUpload = document.getElementById("recordBackgroundUpload");
+const recordBackgroundSoftness = document.getElementById("recordBackgroundSoftness");
 
 const previewTo = document.getElementById("previewTo");
 const previewFrom = document.getElementById("previewFrom");
@@ -56,6 +59,18 @@ let uploadBackendAvailable = true;
 let activePreviewVideoType = "none";
 let activePreviewVideoUrl = "";
 let lastAnnouncedPreviewState = "";
+let customRecordingBackgroundUrl = "";
+let customRecordingBackgroundImage = null;
+let compositeCanvas = null;
+let compositeContext = null;
+let compositeSourceVideo = null;
+let compositePreviewStream = null;
+let compositeRenderFrameId = 0;
+let selfieSegmentation = null;
+let selfieSegmentationReadyPromise = null;
+let selfieSegmentationStatus = "idle";
+let latestSegmentationResult = null;
+let segmentationFrameInFlight = false;
 
 const recordingChunkIntervalMs = 500;
 const isAppleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent)
@@ -465,6 +480,15 @@ function setRecordingAvailability(isAvailable) {
 
   if (isAvailable) {
     cameraEnableBtn.disabled = false;
+    if (recordBackgroundPreset) {
+      recordBackgroundPreset.disabled = false;
+    }
+    if (recordBackgroundUpload) {
+      recordBackgroundUpload.disabled = false;
+    }
+    if (recordBackgroundSoftness) {
+      recordBackgroundSoftness.disabled = false;
+    }
     syncRecordingControls();
     if (cameraBlock) {
       cameraBlock.classList.remove("disabled");
@@ -478,6 +502,15 @@ function setRecordingAvailability(isAvailable) {
   stopCamera();
   setRecordingButtons(false);
   cameraEnableBtn.disabled = true;
+  if (recordBackgroundPreset) {
+    recordBackgroundPreset.disabled = true;
+  }
+  if (recordBackgroundUpload) {
+    recordBackgroundUpload.disabled = true;
+  }
+  if (recordBackgroundSoftness) {
+    recordBackgroundSoftness.disabled = true;
+  }
   recordStartBtn.disabled = true;
   recordStopBtn.disabled = true;
   recordClearBtn.disabled = true;
@@ -499,7 +532,7 @@ async function detectUploadBackendAvailability() {
   }
 
   try {
-    const response = await fetch(apiUrl("/healthz"), {
+    const response = await fetch(apiUrl("/api/healthz"), {
       method: "GET",
       cache: "no-store",
     });
@@ -619,6 +652,13 @@ async function copyShareUrl() {
 
 function resetAll() {
   clearRecording();
+  clearCustomRecordingBackgroundImage();
+  if (recordBackgroundPreset) {
+    recordBackgroundPreset.value = "none";
+  }
+  if (recordBackgroundUpload) {
+    recordBackgroundUpload.value = "";
+  }
   form.reset();
   history.replaceState(null, "", window.location.pathname);
   shareUrlInput.value = "";
@@ -638,6 +678,15 @@ function setRecordingButtons(isRecording) {
 
   recordStartBtn.disabled = isRecording;
   recordStopBtn.disabled = !isRecording;
+  if (recordBackgroundPreset) {
+    recordBackgroundPreset.disabled = isRecording || !uploadBackendAvailable;
+  }
+  if (recordBackgroundUpload) {
+    recordBackgroundUpload.disabled = isRecording || !uploadBackendAvailable;
+  }
+  if (recordBackgroundSoftness) {
+    recordBackgroundSoftness.disabled = isRecording || !uploadBackendAvailable;
+  }
 }
 
 function getAudioTrackState(stream) {
@@ -654,8 +703,369 @@ function getAudioTrackState(stream) {
   };
 }
 
-function buildRecordingStream(stream) {
-  return new MediaStream([...stream.getVideoTracks(), ...stream.getAudioTracks()]);
+function getSelectedRecordingBackgroundPreset() {
+  return (recordBackgroundPreset?.value || "none").trim();
+}
+
+function hasCustomRecordingBackground() {
+  return getSelectedRecordingBackgroundPreset() !== "none" || Boolean(customRecordingBackgroundImage);
+}
+
+function getSelectedBackgroundSoftness() {
+  return (recordBackgroundSoftness?.value || "balanced").trim();
+}
+
+function getBackgroundSoftnessBlur() {
+  const softness = getSelectedBackgroundSoftness();
+  if (softness === "soft") {
+    return 3;
+  }
+  if (softness === "strong") {
+    return 9;
+  }
+  return 6;
+}
+
+function canUseSelfieSegmentation() {
+  return typeof window.SelfieSegmentation === "function";
+}
+
+function stopCompositeRendering() {
+  if (compositeRenderFrameId) {
+    cancelAnimationFrame(compositeRenderFrameId);
+    compositeRenderFrameId = 0;
+  }
+
+  if (compositePreviewStream) {
+    compositePreviewStream.getTracks().forEach((track) => {
+      track.stop();
+    });
+    compositePreviewStream = null;
+  }
+
+  if (compositeSourceVideo) {
+    compositeSourceVideo.pause();
+    compositeSourceVideo.srcObject = null;
+    compositeSourceVideo = null;
+  }
+
+  latestSegmentationResult = null;
+  segmentationFrameInFlight = false;
+}
+
+function clearCustomRecordingBackgroundImage() {
+  if (customRecordingBackgroundUrl) {
+    URL.revokeObjectURL(customRecordingBackgroundUrl);
+    customRecordingBackgroundUrl = "";
+  }
+  customRecordingBackgroundImage = null;
+}
+
+function ensureCompositeRenderer() {
+  if (!compositeCanvas) {
+    compositeCanvas = document.createElement("canvas");
+    compositeContext = compositeCanvas.getContext("2d");
+  }
+
+  if (!compositeSourceVideo) {
+    compositeSourceVideo = document.createElement("video");
+    compositeSourceVideo.muted = true;
+    compositeSourceVideo.autoplay = true;
+    compositeSourceVideo.playsInline = true;
+  }
+
+  if (compositeSourceVideo.srcObject !== cameraStream) {
+    compositeSourceVideo.srcObject = cameraStream;
+    compositeSourceVideo.play().catch(() => {});
+  }
+}
+
+function drawMediaCover(ctx, media, width, height, offsetX = 0, offsetY = 0) {
+  const sourceWidth = Number(media.videoWidth || media.naturalWidth || media.width || width);
+  const sourceHeight = Number(media.videoHeight || media.naturalHeight || media.height || height);
+  if (!sourceWidth || !sourceHeight) {
+    return;
+  }
+
+  const scale = Math.max(width / sourceWidth, height / sourceHeight);
+  const drawWidth = sourceWidth * scale;
+  const drawHeight = sourceHeight * scale;
+  const drawX = offsetX + (width - drawWidth) / 2;
+  const drawY = offsetY + (height - drawHeight) / 2;
+  ctx.drawImage(media, drawX, drawY, drawWidth, drawHeight);
+}
+
+function drawSelectedRecordingBackground(ctx, width, height) {
+  if (customRecordingBackgroundImage?.complete) {
+    drawMediaCover(ctx, customRecordingBackgroundImage, width, height);
+    return;
+  }
+
+  drawPresetRecordingBackground(ctx, width, height, getSelectedRecordingBackgroundPreset());
+}
+
+function drawPresetRecordingBackground(ctx, width, height, preset) {
+  if (preset === "sunset") {
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, "#ffb7a1");
+    gradient.addColorStop(0.52, "#ffd8ae");
+    gradient.addColorStop(1, "#ffeecb");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.42)";
+    ctx.beginPath();
+    ctx.arc(width * 0.84, height * 0.2, Math.min(width, height) * 0.16, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  if (preset === "meadow") {
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, "#a9e8d0");
+    gradient.addColorStop(0.56, "#d6f4d7");
+    gradient.addColorStop(1, "#f3ffe9");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = "rgba(120, 198, 167, 0.28)";
+    ctx.fillRect(0, height * 0.72, width, height * 0.28);
+    return;
+  }
+
+  if (preset === "midnight") {
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, "#1f3b73");
+    gradient.addColorStop(0.58, "#2a5da5");
+    gradient.addColorStop(1, "#3d86cb");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.18)";
+    ctx.beginPath();
+    ctx.arc(width * 0.16, height * 0.2, Math.min(width, height) * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  ctx.fillStyle = "#111";
+  ctx.fillRect(0, 0, width, height);
+}
+
+function drawRoundedRectPath(ctx, x, y, width, height, radius) {
+  const safeRadius = Math.max(0, Math.min(radius, Math.min(width, height) / 2));
+  ctx.beginPath();
+  ctx.moveTo(x + safeRadius, y);
+  ctx.lineTo(x + width - safeRadius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + safeRadius);
+  ctx.lineTo(x + width, y + height - safeRadius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - safeRadius, y + height);
+  ctx.lineTo(x + safeRadius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - safeRadius);
+  ctx.lineTo(x, y + safeRadius);
+  ctx.quadraticCurveTo(x, y, x + safeRadius, y);
+  ctx.closePath();
+}
+
+function drawCompositeFrame() {
+  if (!compositeContext || !compositeCanvas || !compositeSourceVideo || !cameraStream) {
+    return;
+  }
+
+  const settings = cameraStream.getVideoTracks()[0]?.getSettings?.() || {};
+  const frameWidth = Number(settings.width) > 0 ? Number(settings.width) : 1280;
+  const frameHeight = Number(settings.height) > 0 ? Number(settings.height) : 720;
+
+  if (compositeCanvas.width !== frameWidth || compositeCanvas.height !== frameHeight) {
+    compositeCanvas.width = frameWidth;
+    compositeCanvas.height = frameHeight;
+  }
+
+  const ctx = compositeContext;
+  ctx.clearRect(0, 0, frameWidth, frameHeight);
+
+  if (latestSegmentationResult?.segmentationMask) {
+    ctx.save();
+    ctx.filter = `blur(${getBackgroundSoftnessBlur()}px)`;
+    ctx.drawImage(latestSegmentationResult.segmentationMask, 0, 0, frameWidth, frameHeight);
+    ctx.filter = "none";
+    ctx.globalCompositeOperation = "source-in";
+    drawMediaCover(ctx, compositeSourceVideo, frameWidth, frameHeight);
+    ctx.globalCompositeOperation = "destination-over";
+    drawSelectedRecordingBackground(ctx, frameWidth, frameHeight);
+    ctx.restore();
+  } else {
+    drawSelectedRecordingBackground(ctx, frameWidth, frameHeight);
+
+    const inset = Math.round(Math.min(frameWidth, frameHeight) * 0.06);
+    const contentX = inset;
+    const contentY = inset;
+    const contentWidth = Math.max(frameWidth - inset * 2, 1);
+    const contentHeight = Math.max(frameHeight - inset * 2, 1);
+    const cornerRadius = Math.round(Math.min(frameWidth, frameHeight) * 0.04);
+
+    ctx.save();
+    drawRoundedRectPath(ctx, contentX, contentY, contentWidth, contentHeight, cornerRadius);
+    ctx.clip();
+    drawMediaCover(ctx, compositeSourceVideo, contentWidth, contentHeight, contentX, contentY);
+    ctx.restore();
+  }
+}
+
+async function ensureSelfieSegmentationReady() {
+  if (selfieSegmentationStatus === "ready") {
+    return true;
+  }
+
+  if (selfieSegmentationStatus === "failed") {
+    return false;
+  }
+
+  if (!canUseSelfieSegmentation()) {
+    selfieSegmentationStatus = "failed";
+    return false;
+  }
+
+  if (selfieSegmentationReadyPromise) {
+    return selfieSegmentationReadyPromise;
+  }
+
+  selfieSegmentationStatus = "loading";
+  selfieSegmentationReadyPromise = Promise.resolve().then(() => {
+    try {
+      selfieSegmentation = new window.SelfieSegmentation({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`,
+      });
+      selfieSegmentation.setOptions({ modelSelection: 1 });
+      selfieSegmentation.onResults((results) => {
+        latestSegmentationResult = results;
+      });
+      selfieSegmentationStatus = "ready";
+      return true;
+    } catch {
+      selfieSegmentationStatus = "failed";
+      return false;
+    }
+  }).finally(() => {
+    selfieSegmentationReadyPromise = null;
+  });
+
+  return selfieSegmentationReadyPromise;
+}
+
+function requestSegmentationFrame() {
+  if (
+    !selfieSegmentation
+    || selfieSegmentationStatus !== "ready"
+    || segmentationFrameInFlight
+    || !compositeSourceVideo
+    || compositeSourceVideo.readyState < 2
+  ) {
+    return;
+  }
+
+  segmentationFrameInFlight = true;
+  Promise.resolve(selfieSegmentation.send({ image: compositeSourceVideo }))
+    .catch(() => {
+      selfieSegmentationStatus = "failed";
+      latestSegmentationResult = null;
+    })
+    .finally(() => {
+      segmentationFrameInFlight = false;
+    });
+}
+
+function runCompositeLoop() {
+  drawCompositeFrame();
+  requestSegmentationFrame();
+  compositeRenderFrameId = requestAnimationFrame(runCompositeLoop);
+}
+
+async function startCompositePreview() {
+  if (!cameraStream) {
+    return false;
+  }
+
+  ensureCompositeRenderer();
+  if (!compositeContext || !compositeCanvas) {
+    return false;
+  }
+
+  const segmentationReady = await ensureSelfieSegmentationReady();
+
+  if (!compositePreviewStream) {
+    compositePreviewStream = compositeCanvas.captureStream(30);
+  }
+
+  if (cameraPreview.srcObject !== compositePreviewStream) {
+    cameraPreview.srcObject = compositePreviewStream;
+    cameraPreview.play().catch(() => {});
+  }
+
+  if (!compositeRenderFrameId) {
+    runCompositeLoop();
+  }
+
+  return segmentationReady;
+}
+
+async function syncCameraPreviewMode() {
+  if (!cameraStream) {
+    return;
+  }
+
+  if (hasCustomRecordingBackground()) {
+    const segmentationReady = await startCompositePreview();
+    if (!segmentationReady && !useNativeCaptureMode) {
+      setRecordStatus("Virtual background is unavailable in this browser. Using a framed background instead.", "warning");
+    }
+  } else {
+    stopCompositeRendering();
+    cameraPreview.srcObject = cameraStream;
+    cameraPreview.play().catch(() => {});
+  }
+}
+
+async function getVideoTrackForRecording() {
+  if (hasCustomRecordingBackground()) {
+    await startCompositePreview();
+    const composedTrack = compositePreviewStream?.getVideoTracks?.()[0];
+    if (composedTrack) {
+      return composedTrack;
+    }
+  }
+
+  return cameraStream?.getVideoTracks?.()[0] || null;
+}
+
+async function handleCustomRecordingBackgroundUpload() {
+  const selectedFile = recordBackgroundUpload?.files?.[0];
+  if (!selectedFile) {
+    clearCustomRecordingBackgroundImage();
+    syncCameraPreviewMode();
+    setRecordStatus("Custom background image removed.", "info");
+    return;
+  }
+
+  if (!selectedFile.type.startsWith("image/")) {
+    setRecordStatus("Please choose an image file for custom background.", "warning");
+    return;
+  }
+
+  clearCustomRecordingBackgroundImage();
+  customRecordingBackgroundUrl = URL.createObjectURL(selectedFile);
+
+  const nextImage = new Image();
+  nextImage.src = customRecordingBackgroundUrl;
+
+  try {
+    await nextImage.decode();
+  } catch {
+    clearCustomRecordingBackgroundImage();
+    setRecordStatus("Could not load that background image. Try another file.", "error");
+    return;
+  }
+
+  customRecordingBackgroundImage = nextImage;
+  syncCameraPreviewMode();
+  setRecordStatus("Custom background image ready for recording.", "success");
 }
 
 function getSupportedMimeType() {
@@ -700,9 +1110,12 @@ async function enableCamera() {
       }
     });
     cameraPreview.srcObject = cameraStream;
+    syncCameraPreviewMode();
 
     const audioState = getAudioTrackState(cameraStream);
-    if (!audioState.hasAudioTrack) {
+    if (useNativeCaptureMode && hasCustomRecordingBackground()) {
+      setRecordStatus("Camera enabled. Background effects are disabled in iPhone native capture mode.", "warning");
+    } else if (!audioState.hasAudioTrack) {
       setRecordStatus("Camera enabled, but microphone track is missing. Check mic permissions for this site.", "warning");
     } else if (audioState.muted || !audioState.enabled || audioState.readyState !== "live") {
       setRecordStatus("Camera enabled, but microphone is not active yet. Check browser mic permissions and input device.", "warning");
@@ -733,8 +1146,12 @@ function clearRecording() {
   updatePreview();
 }
 
-function startRecording() {
+async function startRecording() {
   if (useNativeCaptureMode) {
+    if (hasCustomRecordingBackground()) {
+      setRecordStatus("Custom backgrounds are not applied in iPhone native capture mode.", "warning");
+    }
+
     if (!nativeRecorderInput) {
       setRecordStatus("Native camera capture is unavailable on this browser.", "error");
       return;
@@ -766,7 +1183,19 @@ function startRecording() {
   const useIosRecorderMode = isAppleMobile;
 
   try {
-    recordingStream = useIosRecorderMode ? cameraStream : buildRecordingStream(cameraStream);
+    if (hasCustomRecordingBackground()) {
+      setRecordStatus("Preparing virtual background...", "info");
+    }
+
+    const selectedVideoTrack = await getVideoTrackForRecording();
+    if (!selectedVideoTrack) {
+      setRecordStatus("No camera video track available. Re-enable camera and try again.", "error");
+      return;
+    }
+
+    recordingStream = useIosRecorderMode
+      ? cameraStream
+      : new MediaStream([selectedVideoTrack, ...cameraStream.getAudioTracks()]);
     mediaRecorder = shouldForceMimeType
       ? new MediaRecorder(recordingStream, { mimeType })
       : new MediaRecorder(recordingStream);
@@ -978,9 +1407,15 @@ function stopCamera() {
     return;
   }
 
-  cameraStream.getTracks().forEach((track) => track.stop());
+  stopCompositeRendering();
+
+  cameraStream.getTracks().forEach((track) => {
+    track.stop();
+  });
   if (recordingStream) {
-    recordingStream.getTracks().forEach((track) => track.stop());
+    recordingStream.getTracks().forEach((track) => {
+      track.stop();
+    });
     recordingStream = null;
   }
   cameraPreview.srcObject = null;
@@ -1002,6 +1437,33 @@ videoUrlInput.addEventListener("input", () => {
   schedulePreviewUpdate();
 });
 
+if (recordBackgroundPreset) {
+  recordBackgroundPreset.addEventListener("change", () => {
+    if (cameraStream) {
+      syncCameraPreviewMode();
+      if (hasCustomRecordingBackground()) {
+        setRecordStatus("Background effect enabled for next recording.", "success");
+      } else {
+        setRecordStatus("Background effect turned off.", "info");
+      }
+    }
+  });
+}
+
+if (recordBackgroundUpload) {
+  recordBackgroundUpload.addEventListener("change", () => {
+    handleCustomRecordingBackgroundUpload();
+  });
+}
+
+if (recordBackgroundSoftness) {
+  recordBackgroundSoftness.addEventListener("change", () => {
+    if (cameraStream && hasCustomRecordingBackground()) {
+      setRecordStatus(`Edge softness set to ${getSelectedBackgroundSoftness()}.`, "info");
+    }
+  });
+}
+
 generateBtn.addEventListener("click", () => {
   generateShareUrl();
 });
@@ -1020,6 +1482,7 @@ if (nativeRecorderInput) {
 
 window.addEventListener("beforeunload", () => {
   stopCamera();
+  clearCustomRecordingBackgroundImage();
   if (recordedVideoUrl) {
     URL.revokeObjectURL(recordedVideoUrl);
   }
@@ -1029,6 +1492,15 @@ setRecordingButtons(false);
 if (useNativeCaptureMode) {
   recordStartBtn.textContent = "Open Camera";
   cameraEnableBtn.disabled = true;
+  if (recordBackgroundPreset) {
+    recordBackgroundPreset.disabled = true;
+  }
+  if (recordBackgroundUpload) {
+    recordBackgroundUpload.disabled = true;
+  }
+  if (recordBackgroundSoftness) {
+    recordBackgroundSoftness.disabled = true;
+  }
   setRecordStatus("iPhone mode: use Open Camera to record reliably.", "info");
 }
 loadStateFromQuery()
