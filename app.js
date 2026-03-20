@@ -1078,7 +1078,53 @@ function getSupportedMimeType() {
   return mimeTypes.find((item) => MediaRecorder.isTypeSupported(item)) || "";
 }
 
+function mapCameraErrorToMessage(error) {
+  const errorName = String(error?.name || "");
+
+  if (errorName === "NotAllowedError" || errorName === "PermissionDeniedError") {
+    return "Camera access was blocked. Allow camera permission in browser settings and try again.";
+  }
+
+  if (errorName === "NotFoundError" || errorName === "DevicesNotFoundError") {
+    return "No camera device was found. Connect a camera and try again.";
+  }
+
+  if (errorName === "NotReadableError" || errorName === "TrackStartError") {
+    return "Camera is in use by another app. Close other camera apps and retry.";
+  }
+
+  if (errorName === "OverconstrainedError" || errorName === "ConstraintNotSatisfiedError") {
+    return "Camera settings are not supported on this device. Try a different browser/device.";
+  }
+
+  if (errorName === "SecurityError") {
+    return "Camera access requires a secure page (HTTPS or localhost).";
+  }
+
+  return "Camera is unavailable right now. Check permissions and device connection, then try again.";
+}
+
+function requestCameraStream(preferAudio = true) {
+  const constraints = {
+    video: true,
+    audio: preferAudio
+      ? {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        }
+      : false,
+  };
+
+  return navigator.mediaDevices.getUserMedia(constraints);
+}
+
 async function enableCamera() {
+  if (!window.isSecureContext && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+    setRecordStatus("Camera access requires HTTPS (or localhost). Open this page on HTTPS and try again.", "error");
+    return;
+  }
+
   if (!navigator.mediaDevices?.getUserMedia) {
     setRecordStatus("Camera API is not available in this browser.", "error");
     return;
@@ -1089,15 +1135,33 @@ async function enableCamera() {
     return;
   }
 
+  let requestedWithAudio = true;
   try {
-    cameraStream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    cameraStream = await requestCameraStream(true);
+  } catch (error) {
+    const errorName = String(error?.name || "");
+    const canRetryVideoOnly = errorName === "NotAllowedError"
+      || errorName === "PermissionDeniedError"
+      || errorName === "NotFoundError"
+      || errorName === "DevicesNotFoundError"
+      || errorName === "OverconstrainedError"
+      || errorName === "ConstraintNotSatisfiedError";
+
+    if (!canRetryVideoOnly) {
+      setRecordStatus(mapCameraErrorToMessage(error), "error");
+      return;
+    }
+
+    try {
+      requestedWithAudio = false;
+      cameraStream = await requestCameraStream(false);
+    } catch (retryError) {
+      setRecordStatus(mapCameraErrorToMessage(retryError), "error");
+      return;
+    }
+  }
+
+  try {
     cameraStream.getAudioTracks().forEach((track) => {
       if (!track.enabled) {
         track.enabled = true;
@@ -1107,7 +1171,9 @@ async function enableCamera() {
     syncCameraPreviewMode();
 
     const audioState = getAudioTrackState(cameraStream);
-    if (useNativeCaptureMode && hasCustomRecordingBackground()) {
+    if (!requestedWithAudio && !audioState.hasAudioTrack) {
+      setRecordStatus("Camera enabled without microphone. Recording will be video-only.", "warning");
+    } else if (useNativeCaptureMode && hasCustomRecordingBackground()) {
       setRecordStatus("Camera enabled. Background effects are disabled in iPhone native capture mode.", "warning");
     } else if (!audioState.hasAudioTrack) {
       setRecordStatus("Camera enabled, but microphone track is missing. Check mic permissions for this site.", "warning");
@@ -1116,8 +1182,9 @@ async function enableCamera() {
     } else {
       setRecordStatus("Camera and microphone enabled. Start recording when ready.", "success");
     }
-  } catch {
-    setRecordStatus("Camera permission denied or unavailable.", "error");
+  } catch (error) {
+    stopCamera();
+    setRecordStatus(mapCameraErrorToMessage(error), "error");
   }
 }
 
