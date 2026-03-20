@@ -15,8 +15,8 @@ const cameraBlock = document.querySelector(".camera-block");
 
 const configuredApiOrigin = String(window.__VIDEO_CARD_API_ORIGIN__ || "").trim();
 const productionApiOrigin = "https://video-card-api-production.up.railway.app";
-const isHostedVercel = window.location.hostname.endsWith("vercel.app");
-const apiOrigin = configuredApiOrigin || (isHostedVercel ? productionApiOrigin : "");
+const isLocalHost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+const apiOrigin = configuredApiOrigin || (!isLocalHost ? productionApiOrigin : "");
 
 const toNameCounter = document.getElementById("toNameCounter");
 const fromNameCounter = document.getElementById("fromNameCounter");
@@ -532,18 +532,16 @@ async function detectUploadBackendAvailability() {
     return;
   }
 
+  if (apiOrigin) {
+    setRecordingAvailability(true);
+    return;
+  }
+
   try {
-    let response = await fetch(apiUrl("/api/healthz"), {
+    const response = await fetch(apiUrl("/api/healthz"), {
       method: "GET",
       cache: "no-store",
     });
-
-    if (!response.ok && apiOrigin) {
-      response = await fetch(apiUrl("/healthz"), {
-        method: "GET",
-        cache: "no-store",
-      });
-    }
 
     setRecordingAvailability(response.ok);
   } catch {
